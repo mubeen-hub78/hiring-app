@@ -1,47 +1,149 @@
 pipeline {
     agent any
 
-        environment {
+    environment {
+        SONAR_HOST = 'http://54.81.232.206:9000'
+        SONAR_TOKEN_CREDENTIAL_ID = 'sonar'
+
+        NEXUS_URL = 'http://54.81.232.206:8081/repository/maven-snapshots/'
+        NEXUS_USERNAME = 'admin'
+        NEXUS_PASSWORD = 'Mubsad321.'
+
+        SLACK_WEBHOOK_URL = 'https://hooks.slack.com/services/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'
+
+        TOMCAT_URL = 'http://54.81.232.206:8083/manager/text'
+        TOMCAT_USERNAME = 'admin'
+        TOMCAT_PASSWORD = 'admin123'
+        APP_CONTEXT = 'hiring-app'
+
+        GIT_REPO = 'https://github.com/mubeen-hub78/hiring-app.git'
+        GIT_BRANCH = 'main'
+
+        DOCKER_IMAGE_NAME = 'sabair0509/hiring-app'
         IMAGE_TAG = "${BUILD_NUMBER}"
     }
 
     stages {
-        
-       
-        stage('Docker Build') {
+        stage('Git Clone Application Code') {
             steps {
-                sh "docker build . -t sabair0509/hiring-app:$BUILD_NUMBER"
+                echo 'Cloning application repository...'
+                git branch: "${env.GIT_BRANCH}", url: "${env.GIT_REPO}"
             }
         }
+
+        stage('Build with Maven') {
+            steps {
+                echo 'Building with Maven inside Docker...'
+                script {
+                    def containerProjectRoot = "/app"
+                    sh """
+                        docker run --rm \\
+                          -v "${env.WORKSPACE}:${containerProjectRoot}" \\
+                          -v /var/lib/jenkins/.m2:/root/.m2 \\
+                          -w "${containerProjectRoot}" \\
+                          maven:3.8.6-eclipse-temurin-17 \\
+                          mvn clean compile package -DskipTests
+                    """
+
+                    sh """
+                        if [ ! -d "${env.WORKSPACE}/target" ]; then
+                          echo "ERROR: target directory not found. Build probably failed."
+                          exit 1
+                        fi
+                    """
+                }
+            }
+        }
+
+        stage('SonarQube Analysis') {
+            steps {
+                echo 'Running SonarQube analysis...'
+                script {
+                    withCredentials([string(credentialsId: "${env.SONAR_TOKEN_CREDENTIAL_ID}", variable: 'SONAR_TOKEN')]) {
+                        def containerProjectRoot = "/app"
+                        sh """
+                            docker run --rm \\
+                              -e SONAR_HOST_URL=${SONAR_HOST} \\
+                              -e SONAR_TOKEN=${SONAR_TOKEN} \\
+                              -v "${env.WORKSPACE}:${containerProjectRoot}" \\
+                              -w "${containerProjectRoot}" \\
+                              sonarsource/sonar-scanner-cli \\
+                              -Dsonar.projectKey=${APP_CONTEXT} \\
+                              -Dsonar.sources=src \\
+                              -Dsonar.java.binaries=target/classes \\
+                              -Dsonar.host.url=${SONAR_HOST} \\
+                              -Dsonar.login=${SONAR_TOKEN}
+                        """
+                    }
+                }
+            }
+        }
+
+        stage('Upload to Nexus') {
+            steps {
+                echo 'Uploading artifact to Nexus...'
+                script {
+                    def warFile = findFiles(glob: "target/${APP_CONTEXT}.war")[0]?.path
+                    if (!warFile) {
+                        error "WAR file not found, build may have failed. Expected: target/${APP_CONTEXT}.war"
+                    }
+
+                    sh """
+                        curl -v -u ${NEXUS_USERNAME}:${NEXUS_PASSWORD} --upload-file ${warFile} \\
+                          ${NEXUS_URL}${APP_CONTEXT}/0.1-SNAPSHOT/${APP_CONTEXT}-0.1-SNAPSHOT.war
+                    """
+                }
+            }
+        }
+
+        stage('Docker Build') {
+            steps {
+                sh "docker build . -t ${env.DOCKER_IMAGE_NAME}:${env.IMAGE_TAG}"
+            }
+        }
+
         stage('Docker Push') {
             steps {
                 withCredentials([string(credentialsId: 'docker-hub', variable: 'hubPwd')]) {
                     sh "docker login -u sabair0509 -p ${hubPwd}"
-                    sh "docker push sabair0509/hiring-app:$BUILD_NUMBER"
+                    sh "docker push ${env.DOCKER_IMAGE_NAME}:${env.IMAGE_TAG}"
                 }
             }
         }
-        stage('Checkout K8S manifest SCM'){
+
+        stage('Deploy to Tomcat') {
             steps {
-              git branch: 'main', url: 'https://github.com/betawins/Hiring-app-argocd.git'
+                echo 'Deploying WAR to Tomcat...'
+                script {
+                    def warFile = findFiles(glob: "target/${APP_CONTEXT}.war")[0]?.path
+                    if (!warFile) {
+                        error "WAR file not found for deployment."
+                    }
+
+                    sh """
+                        curl -T ${warFile} \\
+                          "${TOMCAT_URL}/deploy?path=/${APP_CONTEXT}&update=true" \\
+                          --user ${TOMCAT_USERNAME}:${TOMCAT_PASSWORD}
+                    """
+                }
             }
-        } 
-        stage('Update K8S manifest & push to Repo'){
-            steps {
-                script{
-                   withCredentials([usernamePassword(credentialsId: 'Github_server', passwordVariable: 'GIT_PASSWORD', usernameVariable: 'GIT_USERNAME')]) { 
-                        sh '''
-                        cat /var/lib/jenkins/workspace/$JOB_NAME/dev/deployment.yaml
-                        sed -i "s/5/${BUILD_NUMBER}/g" /var/lib/jenkins/workspace/$JOB_NAME/dev/deployment.yaml
-                        cat /var/lib/jenkins/workspace/$JOB_NAME/dev/deployment.yaml
-                        git add .
-                        git commit -m 'Updated the deploy yaml | Jenkins Pipeline'
-                        git remote -v
-                        git push https://$GIT_USERNAME:$GIT_PASSWORD@github.com/betawins/Hiring-app-argocd.git main
-                        '''                        
-                      }
-                  }
-            }   
         }
+
+        stage('Slack Notification') {
+            steps {
+                echo 'Sending Slack notification...'
+                script {
+                    def message = """
+                        {
+                            "text": "✅ *Build and Deployment SUCCESSFUL* for *${APP_CONTEXT}* (Build #${BUILD_NUMBER}) on *${GIT_BRANCH}* branch! 🚀"
+                        }
+                    """
+                    sh """
+                        curl -X POST -H 'Content-type: application/json' \\
+                          --data '${message}' ${SLACK_WEBHOOK_URL}
+                    """
+                }
             }
-} 
+        }
+    }
+}
