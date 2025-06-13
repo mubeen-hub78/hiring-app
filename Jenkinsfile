@@ -6,7 +6,7 @@ pipeline {
         SONAR_TOKEN_CREDENTIAL_ID = 'sonar'
 
         NEXUS_USERNAME = 'admin'
-        NEXUS_PASSWORD = 'Mubsad321.' # Directly used for Docker build-arg, but remember settings.xml for Maven deploy.
+        NEXUS_PASSWORD = 'Mubsad321.' // This comment is now correct using '//'
 
         SLACK_WEBHOOK_URL = 'https://hooks.slack.com/services/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'
 
