@@ -5,7 +5,8 @@ pipeline {
         SONAR_HOST = 'http://54.81.232.206:9000'
         SONAR_TOKEN_CREDENTIAL_ID = 'sonar'
 
-        NEXUS_URL = 'http://54.81.232.206:8081/repository/maven-snapshots/'
+        NEXUS_URL_SNAPSHOTS = 'http://54.81.232.206:8081/repository/maven-snapshots/'
+        NEXUS_URL_RELEASES = 'http://54.81.232.206:8081/repository/maven-releases/'
         NEXUS_USERNAME = 'admin'
         NEXUS_PASSWORD = 'Mubsad321.'
 
@@ -98,7 +99,12 @@ pipeline {
 
         stage('Docker Build') {
             steps {
-                sh "docker build . -t ${env.DOCKER_IMAGE_NAME}:${env.IMAGE_TAG}"
+                sh """
+                    docker build . \\
+                      -t ${env.DOCKER_IMAGE_NAME}:${env.IMAGE_TAG} \\
+                      --build-arg NEXUS_USERNAME=${NEXUS_USERNAME} \\
+                      --build-arg NEXUS_PASSWORD=${NEXUS_PASSWORD}
+                """
             }
         }
 
