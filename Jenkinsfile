@@ -106,14 +106,7 @@ pipeline {
             }
         }
 
-        stage('Docker Push') {
-            steps {
-                withCredentials([string(credentialsId: 'docker-hub', variable: 'hubPwd')]) {
-                    sh "docker login -u sabair0509 -p ${hubPwd}"
-                    sh "docker push ${env.DOCKER_IMAGE_NAME}:${env.IMAGE_TAG}"
-                }
-            }
-        }
+        // Removed the 'Docker Push' stage here as you don't use Docker Hub
 
         stage('Deploy to Tomcat') {
             steps {
