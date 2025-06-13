@@ -81,16 +81,16 @@ pipeline {
 
         stage('Upload to Nexus') {
             steps {
-                echo 'Uploading artifact to Nexus...'
+                echo 'Deploying artifact to Nexus via Maven...'
                 script {
-                    def warFile = findFiles(glob: "target/${APP_CONTEXT}.war")[0]?.path
-                    if (!warFile) {
-                        error "WAR file not found, build may have failed. Expected: target/${APP_CONTEXT}.war"
-                    }
-
+                    def containerProjectRoot = "/app"
                     sh """
-                        curl -v -u ${NEXUS_USERNAME}:${NEXUS_PASSWORD} --upload-file ${warFile} \\
-                          ${NEXUS_URL}${APP_CONTEXT}/0.1-SNAPSHOT/${APP_CONTEXT}-0.1-SNAPSHOT.war
+                        docker run --rm \\
+                          -v "${env.WORKSPACE}:${containerProjectRoot}" \\
+                          -v /var/lib/jenkins/.m2:/root/.m2 \\
+                          -w "${containerProjectRoot}" \\
+                          maven:3.8.6-eclipse-temurin-17 \\
+                          mvn deploy -s /root/.m2/settings.xml
                     """
                 }
             }
